@@ -1,18 +1,4 @@
-{%- set ifs = obj.interfaces or [] -%}
-interfaces {
-{%- for i in ifs -%}
-  {%- set n = i.name | default('') -%}
-  {%- set uv = i.untagged_vlan | default(None) -%}
-  {%- set uv_name = (uv.name | default('')) if uv is not none else '' -%}
-  {%- if n and ('.' not in n) and (n[:4] != 'fxp0') and uv_name -%}
-  {{ n }} {
-    unit 0 {
-      family ethernet-switching {
-        interface-mode access;
-        vlan { members {{ uv_name }}; }
-      }
-    }
-  }
-  {%- endif -%}
-{%- endfor -%}
-}
+{# top-level template; only includes the per-interface config #}
+{# you can add more includes later (dns, syslog, etc.) #}
+
+{% include './interfaces.j2' %}
