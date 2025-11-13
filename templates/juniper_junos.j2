@@ -1,6 +1,2 @@
-{%- set ifs = obj.interfaces or [] -%}
 interfaces {
-{%- for i in ifs if i.name | default('') -%}
-  {{ i.name }} { }
-{%- endfor -%}
 }
