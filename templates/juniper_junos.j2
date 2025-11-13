@@ -1,15 +1,16 @@
-vlans {
-{% for iface in obj.interfaces if iface.mode == "access" and iface.untagged_vlan -%}
-  {{ iface.untagged_vlan.name }} { vlan-id {{ iface.untagged_vlan.vid }}; }
-{% endfor -%}
-}
+{# Render nur Access-Ports mit untagged_vlan; ignoriert Subinterfaces (.0) und fxp0 #}
 interfaces {
-{% for iface in obj.interfaces if iface.mode == "access" and iface.untagged_vlan -%}
-  {{ iface.name }} {
+{% for i in obj.interfaces
+     if i.untagged_vlan
+     and i.enabled
+     and i.name
+     and '.' not in i.name
+     and not i.name.startswith('fxp0') -%}
+  {{ i.name }} {
     unit 0 {
       family ethernet-switching {
         interface-mode access;
-        vlan { members {{ iface.untagged_vlan.name }}; }
+        vlan { members {{ i.untagged_vlan.name }}; }
       }
     }
   }
