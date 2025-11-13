@@ -1,0 +1,11 @@
+{# renders "set" lines for access ports that have an untagged VLAN #}
+{%- set ifs = obj.interfaces or [] -%}
+{%- for i in ifs -%}
+  {%- set name = i.name | default('') -%}
+  {%- set uv   = i.untagged_vlan | default(None) -%}
+  {%- set uvn  = (uv.name | default('')) if uv is not none else '' -%}
+  {%- if name and uvn and ('.' not in name) and (name[:4] != 'fxp0') -%}
+set interfaces {{ name }} unit 0 family ethernet-switching interface-mode access
+set interfaces {{ name }} unit 0 family ethernet-switching vlan members {{ uvn }}
+  {%- endif -%}
+{%- endfor -%}
