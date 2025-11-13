@@ -1,4 +1,20 @@
-{# top-level template; only includes the per-interface config #}
-{# you can add more includes later (dns, syslog, etc.) #}
+{# Render hierarchical Junos config nur aus den Feldern, die dein GraphQL liefert #}
+{%- set ifs = obj.interfaces or [] -%}
 
-{% include './interfaces.j2' %}
+interfaces {
+{%- for i in ifs -%}
+  {%- set n = i.name | default('') -%}
+  {%- set uv = (i.untagged_vlan if (i.untagged_vlan is defined) else None) -%}
+  {%- set uvn = (uv.name if (uv and (uv.name is defined)) else '') -%}
+  {%- if n and uvn and ('.' not in n) and (n[:4] != 'fxp0') -%}
+  {{ n }} {
+    unit 0 {
+      family ethernet-switching {
+        interface-mode access;
+        vlan { members {{ uvn }}; }
+      }
+    }
+  }
+  {%- endif -%}
+{%- endfor -%}
+}
