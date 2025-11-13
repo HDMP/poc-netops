@@ -1,1 +1,10 @@
-set system host-name {{ hostname.split('.')[0] }}
+{# rendert set-Befehle für alle Access-Ports mit untagged VLAN #}
+{%- for i in (obj.interfaces or []) -%}
+  {%- set n = i.name | default('') -%}
+  {%- set uv = i.untagged_vlan if (i.untagged_vlan is defined) else none -%}
+  {%- set uvn = (uv.name if uv and (uv.name is defined) else '') -%}
+  {%- if n and uvn and ('.' not in n) and (n[:4] != 'fxp0') -%}
+set interfaces {{ n }} unit 0 family ethernet-switching interface-mode access
+set interfaces {{ n }} unit 0 family ethernet-switching vlan members {{ uvn }}
+  {%- endif -%}
+{%- endfor -%}
