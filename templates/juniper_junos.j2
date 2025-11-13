@@ -1,21 +1,6 @@
-{# templates/juniper_junos.j2 #}
 {%- set ifs = obj.interfaces or [] -%}
-
 interfaces {
-{%- for i in ifs
-    if (i.untagged_vlan is not none)
-       and (i.enabled | default(false))
-       and (i.name | default('')) != ''
-       and ('.' not in (i.name | string))
-       and ((i.name | string)[:4] != 'fxp0')
--%}
-  {{ i.name }} {
-    unit 0 {
-      family ethernet-switching {
-        interface-mode access;
-        vlan { members {{ i.untagged_vlan.name }}; }
-      }
-    }
-  }
+{%- for i in ifs if i.name | default('') -%}
+  {{ i.name }} { }
 {%- endfor -%}
 }
