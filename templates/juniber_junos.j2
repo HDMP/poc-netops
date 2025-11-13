@@ -1,0 +1,17 @@
+vlans {
+{% for iface in obj.interfaces if iface.mode == "access" and iface.untagged_vlan -%}
+  {{ iface.untagged_vlan.name }} { vlan-id {{ iface.untagged_vlan.vid }}; }
+{% endfor -%}
+}
+interfaces {
+{% for iface in obj.interfaces if iface.mode == "access" and iface.untagged_vlan -%}
+  {{ iface.name }} {
+    unit 0 {
+      family ethernet-switching {
+        interface-mode access;
+        vlan { members {{ iface.untagged_vlan.name }}; }
+      }
+    }
+  }
+{% endfor -%}
+}
