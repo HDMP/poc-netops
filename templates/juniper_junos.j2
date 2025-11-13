@@ -1,11 +1,14 @@
-{# Render nur Access-Ports mit untagged_vlan; ignoriert Subinterfaces (.0) und fxp0 #}
+{# templates/juniper_junos.j2 #}
+{%- set ifs = obj.interfaces or [] -%}
+
 interfaces {
-{% for i in obj.interfaces
-     if i.untagged_vlan
-     and i.enabled
-     and i.name
-     and '.' not in i.name
-     and not i.name.startswith('fxp0') -%}
+{%- for i in ifs
+    if (i.untagged_vlan is not none)
+       and (i.enabled | default(false))
+       and (i.name | default('')) != ''
+       and ('.' not in (i.name | string))
+       and ((i.name | string)[:4] != 'fxp0')
+-%}
   {{ i.name }} {
     unit 0 {
       family ethernet-switching {
@@ -14,5 +17,5 @@ interfaces {
       }
     }
   }
-{% endfor -%}
+{%- endfor -%}
 }
