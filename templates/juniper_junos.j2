@@ -2,7 +2,6 @@
 interfaces {
 {% for i in interfaces %}
 {% set n = i.name | default('') %}
-{% if i.name startswith defined %}
 {% if i.untagged_vlan.id is defined %}
   {{ i.name }} {
     unit 0 {
