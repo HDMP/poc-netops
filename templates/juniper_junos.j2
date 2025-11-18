@@ -2,16 +2,18 @@
 interfaces {
 {% for i in interfaces %}
 {% set n = i.name | default('') %}
+{% if i.name startswith defined %}
+{% if i.untagged_vlan.id is defined %}
   {{ i.name }} {
     unit 0 {
       family ethernet-switching {
       interface-mode access;
-      {% if i.untagged_vlan.id is defined %}
       vlan {
         members {{ i.untagged_vlan.name }};
       }
-      {% endif %}
     }
   }
 }
+{% endif %}
 {% endfor %}
+}
