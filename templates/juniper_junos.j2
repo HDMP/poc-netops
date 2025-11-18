@@ -1,18 +1,8 @@
 {# rendert set-Befehle für alle Access-Ports mit untagged VLAN #}
-interfaces {
 {% for i in interfaces %}
 {% set n = i.name | default('') %}
 {% if i.untagged_vlan.id is defined %}
-    {{ i.name }} {
-        unit 0 {
-            family ethernet-switching {
-                interface-mode access;
-                vlan {
-                    members {{ i.untagged_vlan.name }};
-                }
-            }
-        }
-    }
+set interfaces {{ i.name }} unit 0 family ethernet-switching interface-mode access
+set interfaces {{ i.name }} unit 0 family ethernet-switching vlan members {{ i.untagged_vlan.name }}
 {% endif %}
 {% endfor %}
-}
