@@ -119,14 +119,17 @@ class PushConfigToDevice(Job):
             )
             return
 
-        # Nur "set" Zeilen
-        config_lines = []
+        # Config Lines
+        config_lines = [
+            f"delete interfaces {interface.name} unit 0 family ethernet-switching vlan members"
+        ]
+
         for line in rendered.splitlines():
             line = line.strip()
             if not line:
                 continue
             config_lines.append(line)
-
+            
         if not config_lines:
             self.logger.warning(
                 f"[PushConfigToDevice] No 'set' lines generated for {interface}, "
