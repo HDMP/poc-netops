@@ -1,17 +1,20 @@
+# backup_config_job.py
+
 from nautobot.apps.jobs import Job, ObjectVar, register_jobs
 from nautobot.dcim.models import Device
 
-name = "00_Vlan-Change-Jobs"  
+name = "00_Vlan-Change-Jobs"
+
 
 class BackupDeviceConfig(Job):
     """
-    Step 1: Dummy backup job.
+    Step 1: Dummy backup job – currently only logs.
     """
 
     class Meta:
-        name = "Backup device config (POC)"
+        name = "01_Backup device config (POC)"
         description = "Dummy job: would backup config for a single device."
-        commit_default = False  # safe: no real changes
+        commit_default = False  # no DB changes
 
     device = ObjectVar(
         model=Device,
@@ -20,7 +23,6 @@ class BackupDeviceConfig(Job):
     )
 
     def run(self, device, interface=None, vlan=None, **kwargs):
-        # Only log for now, but also show interface / vlan if passed.
         self.logger.info(
             f"[BackupDeviceConfig] Would backup config for device {device} (pk={device.pk})."
         )
