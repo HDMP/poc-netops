@@ -1,10 +1,12 @@
+# sync_socket_job.py
+
 from nautobot.apps.jobs import JobHookReceiver, register_jobs
 from nautobot.dcim.models import Interface
 
-# adjust import path if needed, but this works if all job files are in same JOBS_ROOT
 from config_pipeline_job import ConfigPipeline
 
 name = "00_Vlan-Change-Jobs"
+
 
 class SyncSocketVlanToSwitch(JobHookReceiver):
     """
@@ -13,7 +15,7 @@ class SyncSocketVlanToSwitch(JobHookReceiver):
     """
 
     class Meta:
-        name = "Sync Socket VLAN to Switch"
+        name = "99_Sync Socket VLAN to Switch"
         description = "Synchronize untagged VLAN between Socket and Switch and trigger config pipeline."
         commit_default = True
 
@@ -25,7 +27,6 @@ class SyncSocketVlanToSwitch(JobHookReceiver):
             )
             return
 
-        # Only Interfaces
         if not isinstance(changed_object, Interface):
             self.logger.debug(
                 f"[SyncSocketVlanToSwitch] Changed object is not an Interface "
@@ -39,7 +40,7 @@ class SyncSocketVlanToSwitch(JobHookReceiver):
         role = getattr(device, "role", None)
         role_name = getattr(role, "name", None)
 
-        # Get connected endpoint (GraphQL: connected_interface)
+        # Get connected endpoint
         peer = getattr(iface, "connected_endpoint", None)
         if peer is None:
             self.logger.info(
@@ -64,7 +65,6 @@ class SyncSocketVlanToSwitch(JobHookReceiver):
                 )
                 return
 
-        # Determine peer role
         peer_device = getattr(peer, "device", None)
         peer_role = getattr(peer_device, "role", None)
         peer_role_name = getattr(peer_role, "name", None)
@@ -85,7 +85,6 @@ class SyncSocketVlanToSwitch(JobHookReceiver):
             )
             return
 
-        # VLAN on the interface that triggered the hook
         source = iface
         new_vlan = getattr(source, "untagged_vlan", None)
         if new_vlan is None:
@@ -139,7 +138,6 @@ class SyncSocketVlanToSwitch(JobHookReceiver):
             f"and Switch {switch_iface}, triggering ConfigPipeline."
         )
 
-        # Run ConfigPipeline inline, passing device, interface and vlan
         pipeline_job = ConfigPipeline()
         pipeline_job.logger = self.logger
         pipeline_job.run(
