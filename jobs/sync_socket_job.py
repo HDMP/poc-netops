@@ -4,6 +4,7 @@ from nautobot.dcim.models import Interface
 # adjust import path if needed, but this works if all job files are in same JOBS_ROOT
 from config_pipeline_job import ConfigPipeline
 
+name = "00_Vlan-Change-Jobs"
 
 class SyncSocketVlanToSwitch(JobHookReceiver):
     """
