@@ -3,9 +3,10 @@
 from nautobot.apps.jobs import Job, ObjectVar, register_jobs
 from nautobot.dcim.models import Device
 
-from backup_config_job import BackupDeviceConfig
-from intended_config_job import BuildIntendedConfig
-from push_config_job import PushConfigToDevice
+# WICHTIG: Paket-relative Importe
+from .backup_config_job import BackupDeviceConfig
+from .intended_config_job import BuildIntendedConfig
+from .push_config_job import PushConfigToDevice
 
 name = "00_Vlan-Change-Jobs"
 
@@ -16,8 +17,6 @@ class ConfigPipeline(Job):
       1) Backup
       2) Intended config
       3) Push
-
-    All steps reuse the same logger, and interface/vlan context is passed through.
     """
 
     class Meta:
@@ -40,19 +39,16 @@ class ConfigPipeline(Job):
             f"vlan={getattr(vlan, 'id', vlan)}"
         )
 
-        # Step 1: backup
         self.logger.info("[ConfigPipeline] Step 1: calling BackupDeviceConfig.")
         backup_job = BackupDeviceConfig()
         backup_job.logger = self.logger
         backup_job.run(device=device, interface=interface, vlan=vlan)
 
-        # Step 2: intended
         self.logger.info("[ConfigPipeline] Step 2: calling BuildIntendedConfig.")
         intended_job = BuildIntendedConfig()
         intended_job.logger = self.logger
         intended_job.run(device=device, interface=interface, vlan=vlan)
 
-        # Step 3: push
         self.logger.info("[ConfigPipeline] Step 3: calling PushConfigToDevice.")
         push_job = PushConfigToDevice()
         push_job.logger = self.logger
