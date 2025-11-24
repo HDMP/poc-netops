@@ -9,6 +9,7 @@ from nautobot.dcim.models import Device, Interface
 
 name = "00_Vlan-Change-Jobs"
 
+
 class PushConfigToDevice(Job):
     """
     Step 3: Very simple push job.
@@ -20,9 +21,9 @@ class PushConfigToDevice(Job):
     """
 
     class Meta:
-        name = "Push config to device (POC)"
+        name = "03_Push config to device (POC)"
         description = "Render and push simple Junos 'set' commands for a single switch interface."
-        commit_default = False  # you can set this to True later
+        commit_default = False  # set True später wenn du willst
 
     device = ObjectVar(
         model=Device,
@@ -35,6 +36,9 @@ class PushConfigToDevice(Job):
     TEMPLATE_REL_PATH = "templates/juniper_junos.j2"
 
     def run(self, device, interface=None, vlan=None, **kwargs):
+        # DEBUG marker, damit du siehst, dass diese Version wirklich läuft
+        self.logger.info("[PushConfigToDevice] DEBUG: entering NEW run() implementation")
+
         # Lazy import Netmiko so the module can load even if netmiko is missing.
         try:
             from netmiko import ConnectHandler
@@ -46,7 +50,7 @@ class PushConfigToDevice(Job):
             return
         except Exception as e:
             self.logger.error(
-                f"[PushConfigToDevice] Error importing netmiko: {e}"
+                f"[PushConfigToDevice] Error importing netmiko (NEW): {e}"
             )
             return
 
@@ -139,12 +143,13 @@ class PushConfigToDevice(Job):
             )
             return
 
+        # Hier explizit loggen, welche Commands wir senden
         self.logger.info(
-            f"[PushConfigToDevice] Generated config lines for {device.name} / {interface.name}: "
-            f"{config_lines}"
+            f"[PushConfigToDevice] About to send the following commands to "
+            f"{device.name} / {interface.name}: {config_lines}"
         )
 
-        # Device connection details (secrets: for now, env vars; later you can hook into Nautobot secrets)
+        # Device connection details (für POC via env vars)
         platform = getattr(device, "platform", None)
         driver = getattr(platform, "network_driver", None)
 
@@ -188,6 +193,10 @@ class PushConfigToDevice(Job):
 
         try:
             with ConnectHandler(**device_params) as conn:
+                # Log nochmal kurz vor dem Senden
+                self.logger.info(
+                    f"[PushConfigToDevice] Sending config_set with lines: {config_lines}"
+                )
                 output = conn.send_config_set(config_lines)
                 self.logger.info(
                     f"[PushConfigToDevice] Config push output for {device.name}:\n{output}"
