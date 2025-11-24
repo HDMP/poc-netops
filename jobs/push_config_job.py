@@ -165,15 +165,7 @@ class PushConfigToDevice(Job):
         password = None
 
         # device.secrets_group ist ein RelatedManager, wir nehmen einfach die erste Gruppe
-        secrets_groups = getattr(device, "secrets_group", None)
-        secrets_group = None
-
-        if secrets_groups:
-            try:
-                secrets_group = secrets_groups.first()
-            except TypeError:
-                # falls es doch ein einzelnes Objekt ist und kein Manager
-                secrets_group = secrets_groups
+        secrets_group = getattr(device, "secrets_group", None)
 
         if secrets_group:
             try:
