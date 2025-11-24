@@ -168,7 +168,7 @@ class PushConfigToDevice(Job):
             )
             return
 
-                host = str(primary_ip.address.ip)
+        host = str(primary_ip.address.ip)
 
         # Prefer platform napalm_* (usually backed by Secrets), fallback to env vars
         platform = getattr(device, "platform", None)
