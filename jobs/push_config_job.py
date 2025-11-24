@@ -7,6 +7,7 @@ from jinja2 import Environment, FileSystemLoader
 from nautobot.apps.jobs import Job, ObjectVar, register_jobs
 from nautobot.dcim.models import Device, Interface
 
+name = "00_Vlan-Change-Jobs"
 
 class PushConfigToDevice(Job):
     """
