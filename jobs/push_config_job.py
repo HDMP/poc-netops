@@ -168,16 +168,28 @@ class PushConfigToDevice(Job):
             )
             return
 
-        host = str(primary_ip.address.ip)
-        username = os.environ.get("NETMIKO_USERNAME")
-        password = os.environ.get("NETMIKO_PASSWORD")
+                host = str(primary_ip.address.ip)
+
+        # Prefer platform napalm_* (usually backed by Secrets), fallback to env vars
+        platform = getattr(device, "platform", None)
+        napalm_username = getattr(platform, "napalm_username", None) if platform else None
+        napalm_password = getattr(platform, "napalm_password", None) if platform else None
+
+        username = napalm_username or os.environ.get("NETMIKO_USERNAME")
+        password = napalm_password or os.environ.get("NETMIKO_PASSWORD")
+
+        self.logger.info(
+            f"[PushConfigToDevice] Using credential source: "
+            f"{'platform.napalm_*' if napalm_username and napalm_password else 'ENV NETMIKO_*'}"
+        )
 
         if not username or not password:
             self.logger.error(
-                "[PushConfigToDevice] NETMIKO_USERNAME or NETMIKO_PASSWORD not set in environment, "
-                "cannot push configuration."
+                "[PushConfigToDevice] No credentials found on platform.napalm_* "
+                "and NETMIKO_* env vars are also not set. Cannot push configuration."
             )
             return
+
 
         device_params = {
             "device_type": driver,  # "juniper_junos"
