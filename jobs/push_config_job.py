@@ -7,6 +7,12 @@ from jinja2 import Environment, FileSystemLoader
 from nautobot.apps.jobs import Job, ObjectVar, register_jobs
 from nautobot.dcim.models import Device, Interface
 
+from nautobot.extras.choices import (
+    SecretsGroupAccessTypeChoices,
+    SecretsGroupSecretTypeChoices,
+)
+from nautobot.extras.secrets.exceptions import SecretError
+
 name = "00_Vlan-Change-Jobs"
 
 
@@ -23,7 +29,7 @@ class PushConfigToDevice(Job):
     class Meta:
         name = "03_Push config to device (POC)"
         description = "Render and push simple Junos 'set' commands for a single switch interface."
-        commit_default = False  # set True später wenn du willst
+        commit_default = False
 
     device = ObjectVar(
         model=Device,
@@ -36,10 +42,9 @@ class PushConfigToDevice(Job):
     TEMPLATE_REL_PATH = "templates/juniper_junos.j2"
 
     def run(self, device, interface=None, vlan=None, **kwargs):
-        # DEBUG marker, damit du siehst, dass diese Version wirklich läuft
         self.logger.info("[PushConfigToDevice] DEBUG: entering NEW run() implementation")
 
-        # Lazy import Netmiko so the module can load even if netmiko is missing.
+        # Lazy import Netmiko
         try:
             from netmiko import ConnectHandler
         except ModuleNotFoundError:
@@ -62,11 +67,9 @@ class PushConfigToDevice(Job):
             f"vlan={getattr(vlan, 'id', vlan)}"
         )
 
-        # Basic checks
         if interface is None:
             self.logger.warning(
-                "[PushConfigToDevice] No interface passed, nothing to push. "
-                "This job is meant to be called from the pipeline with an interface."
+                "[PushConfigToDevice] No interface passed, nothing to push."
             )
             return
 
@@ -84,7 +87,6 @@ class PushConfigToDevice(Job):
             )
             return
 
-        # VLAN: prefer the one passed in, fall back to interface.untagged_vlan
         if vlan is None:
             vlan = getattr(interface, "untagged_vlan", None)
 
@@ -95,17 +97,10 @@ class PushConfigToDevice(Job):
             )
             return
 
-        # Repo / template path
+        # Template / repo
         repo_root = os.environ.get(self.REPO_ENV_VAR, self.DEFAULT_REPO_PATH)
         repo_root = Path(repo_root)
         self.logger.info(f"[PushConfigToDevice] Using repo root: {repo_root}")
-
-        if not repo_root.exists():
-            self.logger.error(
-                f"[PushConfigToDevice] Repo root {repo_root} does not exist. "
-                f"Check {self.REPO_ENV_VAR} or DEFAULT_REPO_PATH."
-            )
-            return
 
         template_path = repo_root / self.TEMPLATE_REL_PATH
         if not template_path.exists():
@@ -114,7 +109,6 @@ class PushConfigToDevice(Job):
             )
             return
 
-        # Render template only for this one interface
         try:
             env = Environment(
                 loader=FileSystemLoader(str(template_path.parent)),
@@ -128,7 +122,7 @@ class PushConfigToDevice(Job):
             )
             return
 
-        # Collect "set ..." lines only (no delete)
+        # Nur "set" Zeilen
         config_lines = []
         for line in rendered.splitlines():
             line = line.strip()
@@ -143,13 +137,12 @@ class PushConfigToDevice(Job):
             )
             return
 
-        # Hier explizit loggen, welche Commands wir senden
         self.logger.info(
             f"[PushConfigToDevice] About to send the following commands to "
             f"{device.name} / {interface.name}: {config_lines}"
         )
 
-        # Device connection details (für POC via env vars)
+        # Device / Platform / IP
         platform = getattr(device, "platform", None)
         driver = getattr(platform, "network_driver", None)
 
@@ -170,29 +163,53 @@ class PushConfigToDevice(Job):
 
         host = str(primary_ip.address.ip)
 
-        # Prefer platform napalm_* (usually backed by Secrets), fallback to env vars
-        platform = getattr(device, "platform", None)
-        napalm_username = getattr(platform, "napalm_username", None) if platform else None
-        napalm_password = getattr(platform, "napalm_password", None) if platform else None
+        # --- Credentials via Secrets Group am Device ---
+        username = None
+        password = None
 
-        username = napalm_username or os.environ.get("NETMIKO_USERNAME")
-        password = napalm_password or os.environ.get("NETMIKO_PASSWORD")
+        secrets_group = getattr(device, "secrets_group", None)
+        if secrets_group:
+            try:
+                username = secrets_group.get_secret_value(
+                    access_type=SecretsGroupAccessTypeChoices.TYPE_NETCONF,
+                    secret_type=SecretsGroupSecretTypeChoices.TYPE_USERNAME,
+                    obj=device,
+                )
+                password = secrets_group.get_secret_value(
+                    access_type=SecretsGroupAccessTypeChoices.TYPE_NETCONF,
+                    secret_type=SecretsGroupSecretTypeChoices.TYPE_PASSWORD,
+                    obj=device,
+                )
+                self.logger.info(
+                    "[PushConfigToDevice] Using credentials from device.secrets_group "
+                    "(NETCONF USERNAME/PASSWORD)."
+                )
+            except SecretError as e:
+                self.logger.error(
+                    f"[PushConfigToDevice] Error retrieving credentials from Secrets Group "
+                    f"for device {device}: {e}"
+                )
 
-        self.logger.info(
-            f"[PushConfigToDevice] Using credential source: "
-            f"{'platform.napalm_*' if napalm_username and napalm_password else 'ENV NETMIKO_*'}"
-        )
+        # Fallback: ENV Variablen
+        if not username or not password:
+            env_user = os.environ.get("NETMIKO_USERNAME")
+            env_pass = os.environ.get("NETMIKO_PASSWORD")
+            if env_user and env_pass:
+                username = env_user
+                password = env_pass
+                self.logger.info(
+                    "[PushConfigToDevice] Using fallback credentials from ENV NETMIKO_*."
+                )
 
         if not username or not password:
             self.logger.error(
-                "[PushConfigToDevice] No credentials found on platform.napalm_* "
-                "and NETMIKO_* env vars are also not set. Cannot push configuration."
+                "[PushConfigToDevice] No credentials found in device.secrets_group "
+                "and no NETMIKO_* env vars set. Cannot push configuration."
             )
             return
 
-
         device_params = {
-            "device_type": driver,  # "juniper_junos"
+            "device_type": driver,
             "host": host,
             "username": username,
             "password": password,
@@ -205,7 +222,6 @@ class PushConfigToDevice(Job):
 
         try:
             with ConnectHandler(**device_params) as conn:
-                # Log nochmal kurz vor dem Senden
                 self.logger.info(
                     f"[PushConfigToDevice] Sending config_set with lines: {config_lines}"
                 )
