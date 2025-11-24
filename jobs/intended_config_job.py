@@ -5,11 +5,11 @@ import subprocess
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
-
 from nautobot.apps.jobs import Job, ObjectVar, register_jobs
 from nautobot.dcim.models import Device
 
 name = "00_Vlan-Change-Jobs"
+
 
 class BuildIntendedConfig(Job):
     """
@@ -18,9 +18,9 @@ class BuildIntendedConfig(Job):
     """
 
     class Meta:
-        name = "Build intended config (POC)"
+        name = "02_Build intended config (POC)"
         description = "Render Jinja intended config for a device and store it in the Git repo."
-        commit_default = False  # no DB changes, only filesystem/git
+        commit_default = False  # filesystem + git only
 
     device = ObjectVar(
         model=Device,
@@ -28,14 +28,12 @@ class BuildIntendedConfig(Job):
         description="Device to build intended config for.",
     )
 
-    # Repo and template settings
     REPO_ENV_VAR = "POC_NETOPS_REPO"
     DEFAULT_REPO_PATH = "/opt/nautobot/git/poc_netops"
     TEMPLATE_REL_PATH = "templates/juniper_junos.j2"
     INTENDED_DIR_NAME = "intended"
 
     def run(self, device, interface=None, vlan=None, **kwargs):
-        # Log context
         self.logger.info(
             f"[BuildIntendedConfig] Building intended config for device {device} (pk={device.pk})."
         )
@@ -44,7 +42,7 @@ class BuildIntendedConfig(Job):
             f"vlan={getattr(vlan, 'id', vlan)}"
         )
 
-        # 1) Determine repo path
+        # 1) Repo root
         repo_root = os.environ.get(self.REPO_ENV_VAR, self.DEFAULT_REPO_PATH)
         repo_root = Path(repo_root)
         self.logger.info(f"[BuildIntendedConfig] Using repo root: {repo_root}")
@@ -56,7 +54,7 @@ class BuildIntendedConfig(Job):
             )
             return
 
-        # 2) Check template path
+        # 2) Template
         template_path = repo_root / self.TEMPLATE_REL_PATH
         if not template_path.exists():
             self.logger.error(
@@ -64,14 +62,14 @@ class BuildIntendedConfig(Job):
             )
             return
 
-        # 3) Collect interfaces for this device (future-proof: full device, not only one port)
+        # 3) Interfaces from device (complete device intended)
         interfaces = list(device.interfaces.all())
         self.logger.info(
             f"[BuildIntendedConfig] Rendering intended config for {len(interfaces)} interfaces "
             f"on device {device.name}."
         )
 
-        # 4) Render Jinja template
+        # 4) Render Jinja
         try:
             env = Environment(
                 loader=FileSystemLoader(str(template_path.parent)),
@@ -85,7 +83,7 @@ class BuildIntendedConfig(Job):
             )
             return
 
-        # 5) Write intended config file
+        # 5) Write intended file
         intended_dir = repo_root / self.INTENDED_DIR_NAME
         intended_dir.mkdir(parents=True, exist_ok=True)
 
@@ -101,7 +99,7 @@ class BuildIntendedConfig(Job):
             )
             return
 
-        # 6) Try to git add + commit (optional, local only)
+        # 6) Git add + commit, mit Output im Log
         git_dir = repo_root / ".git"
         if not git_dir.exists():
             self.logger.warning(
@@ -116,18 +114,30 @@ class BuildIntendedConfig(Job):
             self.logger.info(
                 f"[BuildIntendedConfig] Running 'git add {rel_intended_path}'."
             )
-            subprocess.run(
+            add_proc = subprocess.run(
                 ["git", "-C", str(repo_root), "add", str(rel_intended_path)],
+                capture_output=True,
+                text=True,
                 check=False,
+            )
+            self.logger.info(
+                f"[BuildIntendedConfig] git add rc={add_proc.returncode}, "
+                f"stdout='{add_proc.stdout.strip()}', stderr='{add_proc.stderr.strip()}'"
             )
 
             commit_msg = f"Update intended config for device {device.name}"
             self.logger.info(
                 f"[BuildIntendedConfig] Running 'git commit -m \"{commit_msg}\"'."
             )
-            subprocess.run(
+            commit_proc = subprocess.run(
                 ["git", "-C", str(repo_root), "commit", "-m", commit_msg],
+                capture_output=True,
+                text=True,
                 check=False,
+            )
+            self.logger.info(
+                f"[BuildIntendedConfig] git commit rc={commit_proc.returncode}, "
+                f"stdout='{commit_proc.stdout.strip()}', stderr='{commit_proc.stderr.strip()}'"
             )
 
         except Exception as e:
