@@ -1,6 +1,7 @@
 from nautobot.apps.jobs import Job, ObjectVar, register_jobs
 from nautobot.dcim.models import Device
 
+name = "00_Vlan-Change-Jobs"  
 
 class BackupDeviceConfig(Job):
     """
