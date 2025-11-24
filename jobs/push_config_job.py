@@ -172,10 +172,12 @@ class PushConfigToDevice(Job):
                 # access_type lassen wir weg, wir nehmen einfach die USERNAME/PASSWORD Secrets
                 username = secrets_group.get_secret_value(
                     secret_type=SecretsGroupSecretTypeChoices.TYPE_USERNAME,
+                    access_type=SecretsGroupAccessTypeChoices.TYPE_GENERIC,
                     obj=device,
                 )
                 password = secrets_group.get_secret_value(
                     secret_type=SecretsGroupSecretTypeChoices.TYPE_PASSWORD,
+                    access_type=SecretsGroupAccessTypeChoices.TYPE_GENERIC,
                     obj=device,
                 )
                 self.logger.info(
