@@ -1,4 +1,7 @@
 # config_pipeline_job.py
+import os
+import subprocess
+from pathlib import Path
 
 from nautobot.apps.jobs import Job, ObjectVar, register_jobs
 from nautobot.dcim.models import Device
@@ -57,6 +60,29 @@ class ConfigPipeline(Job):
         self.logger.info(
             f"[ConfigPipeline] Pipeline finished for device {device} (pk={device.pk})."
         )
+
+        # Optional: git push am Ende der Pipeline
+        repo_root = Path(os.environ.get("POC_NETOPS_REPO", "/opt/nautobot/git/poc_netops"))
+        git_dir = repo_root / ".git"
+        if git_dir.exists():
+            self.logger.info(
+                f"[ConfigPipeline] Running 'git push' in {repo_root}."
+            )
+            push_proc = subprocess.run(
+                ["git", "-C", str(repo_root), "push"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.logger.info(
+                f"[ConfigPipeline] git push rc={push_proc.returncode}, "
+                f"stdout='{push_proc.stdout.strip()}', stderr='{push_proc.stderr.strip()}'"
+            )
+        else:
+            self.logger.warning(
+                f"[ConfigPipeline] {repo_root} is not a Git repository (no .git), skipping git push."
+            )
+
 
 
 register_jobs(ConfigPipeline)
