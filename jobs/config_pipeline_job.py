@@ -5,6 +5,7 @@ from backup_config_job import BackupDeviceConfig
 from intended_config_job import BuildIntendedConfig
 from push_config_job import PushConfigToDevice
 
+name = "00_Vlan-Change-Jobs"
 
 class ConfigPipeline(Job):
     """
