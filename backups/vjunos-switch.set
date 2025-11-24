@@ -1,0 +1,52 @@
+set version 25.2R1.9
+set system host-name vjunos-switch
+set system root-authentication encrypted-password "$6$YFQ6Myh5$iCHkOUzpLGsb67aW8SqCZfu4S8UVvjskIxgySIJIGKZ4bdAAlVWV64er34Z9/hnL.QsGgfIKYSoIf7Pyap5PA."
+set system login user wanja uid 2000
+set system login user wanja class super-user
+set system login user wanja authentication encrypted-password "$6$SS3Svlvs$ms4skw92zX9NpP9C6PMDbEWH9C52DzAJgALBtPhqyfrNzdPHEpSFlfuuwuNae/2Q/T3AkoShkZamNC052IIFJ."
+set system services netconf ssh
+set system services ssh root-login allow
+set system services ssh protocol-version v2
+set system arp aging-timer 5
+set system authentication-order password
+set system syslog file interactive-commands interactive-commands any
+set system syslog file messages any notice
+set system syslog file messages authorization info
+set system processes dhcp-service traceoptions file dhcp_logfile
+set system processes dhcp-service traceoptions file size 10m
+set system processes dhcp-service traceoptions level all
+set system processes dhcp-service traceoptions flag packet
+set interfaces ge-0/0/0 unit 0 family ethernet-switching interface-mode access
+set interfaces ge-0/0/0 unit 0 family ethernet-switching vlan members B-CLIENT
+set interfaces ge-0/0/1 unit 0 family ethernet-switching interface-mode access
+set interfaces ge-0/0/1 unit 0 family ethernet-switching vlan members A-SERVER
+set interfaces ge-0/0/2 unit 0 family ethernet-switching interface-mode access
+set interfaces ge-0/0/2 unit 0 family ethernet-switching vlan members B-CLIENT
+set interfaces ge-0/0/3 unit 0 family ethernet-switching interface-mode access
+set interfaces ge-0/0/3 unit 0 family ethernet-switching vlan members B-SERVER
+set interfaces ge-0/0/4 unit 0 family ethernet-switching interface-mode access
+set interfaces ge-0/0/4 unit 0 family ethernet-switching vlan members B-SERVER
+set interfaces ge-0/0/5 unit 0 family ethernet-switching interface-mode access
+set interfaces ge-0/0/5 unit 0 family ethernet-switching vlan members A-SERVER
+set interfaces ge-0/0/6 unit 0 family ethernet-switching interface-mode access
+set interfaces ge-0/0/6 unit 0 family ethernet-switching vlan members B-CLIENT
+set interfaces ge-0/0/7 unit 0 family ethernet-switching interface-mode access
+set interfaces ge-0/0/7 unit 0 family ethernet-switching vlan members B-SERVER
+set interfaces ge-0/0/8 unit 0 family ethernet-switching interface-mode access
+set interfaces ge-0/0/8 unit 0 family ethernet-switching vlan members C-CLIENT
+set interfaces ge-0/0/9 unit 0 family ethernet-switching interface-mode access
+set interfaces ge-0/0/9 unit 0 family ethernet-switching vlan members C-SERVER
+set interfaces fxp0 unit 0 family inet address 192.168.111.4/24
+set multi-chassis mc-lag consistency-check
+set routing-options static route 0.0.0.0/0 next-hop 192.168.111.1
+set protocols router-advertisement interface fxp0.0 managed-configuration
+set protocols lldp interface all
+set protocols lldp-med interface all
+set vlans A-CLIENT vlan-id 210
+set vlans A-SERVER vlan-id 211
+set vlans B-CLIENT vlan-id 220
+set vlans B-SERVER vlan-id 221
+set vlans C-CLIENT vlan-id 230
+set vlans C-SERVER vlan-id 231
+set vlans POC-MGMT vlan-id 110
+
