@@ -3,7 +3,7 @@
 from nautobot.apps.jobs import JobHookReceiver, register_jobs
 from nautobot.dcim.models import Interface
 
-from config_pipeline_job import ConfigPipeline
+from .config_pipeline_job import ConfigPipeline
 
 name = "00_Vlan-Change-Jobs"
 
