@@ -7,9 +7,13 @@ from jinja2 import Environment, FileSystemLoader
 from nautobot.apps.jobs import Job, ObjectVar, register_jobs
 from nautobot.dcim.models import Device, Interface
 
-from nautobot.extras.choices import SecretsGroupSecretTypeChoices
-from nautobot.extras.models import SecretsGroupAssociation
+from nautobot.extras.choices import (
+    SecretsGroupAccessTypeChoices,
+    SecretsGroupSecretTypeChoices,
+)
+from nautobot.extras.models import SecretsGroup
 from nautobot.extras.secrets.exceptions import SecretError
+
 
 name = "00_Vlan-Change-Jobs"
 
@@ -161,35 +165,43 @@ class PushConfigToDevice(Job):
 
         host = str(primary_ip.address.ip)
 
-        # --- Credentials via Secrets Group am Device ---
+        # --- Credentials via SecretsGroup (by slug) ---
         username = None
         password = None
 
-        # Nimm die erste SecretsGroupAssociation für dieses Device
-        association = SecretsGroupAssociation.objects.filter(assigned_object=device).first()
+        SECRETS_GROUP_SLUG = "netconf-credentials"  # <== anpassen, falls dein Slug anders heisst
 
-        if association:
-            secrets_group = association.secrets_group
-            access_type = association.access_type  # exakt das, was du im UI gesetzt hast
+        secrets_group = None
+        try:
+            secrets_group = SecretsGroup.objects.get(slug=SECRETS_GROUP_SLUG)
+            self.logger.info(
+                f"[PushConfigToDevice] Using SecretsGroup '{SECRETS_GROUP_SLUG}'."
+            )
+        except SecretsGroup.DoesNotExist:
+            self.logger.error(
+                f"[PushConfigToDevice] SecretsGroup with slug '{SECRETS_GROUP_SLUG}' not found."
+            )
+
+        if secrets_group:
             try:
                 username = secrets_group.get_secret_value(
-                    access_type=access_type,
+                    access_type=SecretsGroupAccessTypeChoices.TYPE_NETCONF,
                     secret_type=SecretsGroupSecretTypeChoices.TYPE_USERNAME,
                     obj=device,
                 )
                 password = secrets_group.get_secret_value(
-                    access_type=access_type,
+                    access_type=SecretsGroupAccessTypeChoices.TYPE_NETCONF,
                     secret_type=SecretsGroupSecretTypeChoices.TYPE_PASSWORD,
                     obj=device,
                 )
                 self.logger.info(
-                    f"[PushConfigToDevice] Using credentials from Secrets Group "
-                    f"'{secrets_group}' (access_type={access_type})."
+                    "[PushConfigToDevice] Retrieved username/password from SecretsGroup "
+                    f"'{SECRETS_GROUP_SLUG}' for device {device}."
                 )
             except SecretError as e:
                 self.logger.error(
-                    f"[PushConfigToDevice] Error retrieving credentials from Secrets Group "
-                    f"for device {device}: {e}"
+                    f"[PushConfigToDevice] Error retrieving credentials from SecretsGroup "
+                    f"'{SECRETS_GROUP_SLUG}' for device {device}: {e}"
                 )
 
         # Fallback: ENV
@@ -205,10 +217,11 @@ class PushConfigToDevice(Job):
 
         if not username or not password:
             self.logger.error(
-                "[PushConfigToDevice] No credentials found in Secrets Group "
-                "and no NETMIKO_* env vars set. Cannot push configuration."
+                "[PushConfigToDevice] No credentials found in SecretsGroup and no NETMIKO_* env vars set. "
+                "Cannot push configuration."
             )
             return
+
 
 
         device_params = {
