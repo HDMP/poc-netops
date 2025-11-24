@@ -11,20 +11,18 @@ name = "00_Vlan-Change-Jobs"
 
 class PushConfigToDevice(Job):
     """
-    Step 3: Push config for a single device/interface using the Junos Jinja template.
+    Step 3: Very simple push job.
 
-    - Expects 'device' from Nautobot (ObjectVar).
-    - Optionally receives 'interface' and 'vlan' from the pipeline job.
-    - Renders config only for the given interface.
-
-    Netmiko is imported lazily inside run(), so that the job module can be loaded
-    even if netmiko is not installed yet.
+    - Takes a device (ObjectVar).
+    - Expects 'interface' and 'vlan' via kwargs (from the pipeline job).
+    - Renders Junos 'set' commands for exactly this interface using the Jinja template.
+    - Sends only these 'set' commands via Netmiko (no deletes, no extra logic).
     """
 
     class Meta:
         name = "Push config to device (POC)"
-        description = "Render and push Junos 'set' config for a single switch interface."
-        commit_default = False  # set to True later when you are confident
+        description = "Render and push simple Junos 'set' commands for a single switch interface."
+        commit_default = False  # you can set this to True later
 
     device = ObjectVar(
         model=Device,
@@ -37,10 +35,9 @@ class PushConfigToDevice(Job):
     TEMPLATE_REL_PATH = "templates/juniper_junos.j2"
 
     def run(self, device, interface=None, vlan=None, **kwargs):
-        # Lazy imports for Netmiko – avoids import errors at job load time.
+        # Lazy import Netmiko so the module can load even if netmiko is missing.
         try:
             from netmiko import ConnectHandler
-            from netmiko.exceptions import NetmikoTimeoutError, NetmikoAuthenticationException
         except ModuleNotFoundError:
             self.logger.error(
                 "[PushConfigToDevice] netmiko is not installed in the Nautobot environment, "
@@ -53,7 +50,6 @@ class PushConfigToDevice(Job):
             )
             return
 
-        # Log context
         self.logger.info(
             f"[PushConfigToDevice] Starting push job for device {device} (pk={device.pk})."
         )
@@ -62,6 +58,7 @@ class PushConfigToDevice(Job):
             f"vlan={getattr(vlan, 'id', vlan)}"
         )
 
+        # Basic checks
         if interface is None:
             self.logger.warning(
                 "[PushConfigToDevice] No interface passed, nothing to push. "
@@ -83,7 +80,18 @@ class PushConfigToDevice(Job):
             )
             return
 
-        # Determine repo / template path
+        # VLAN: prefer the one passed in, fall back to interface.untagged_vlan
+        if vlan is None:
+            vlan = getattr(interface, "untagged_vlan", None)
+
+        if vlan is None:
+            self.logger.info(
+                f"[PushConfigToDevice] No VLAN found for interface {interface}, "
+                f"nothing to push."
+            )
+            return
+
+        # Repo / template path
         repo_root = os.environ.get(self.REPO_ENV_VAR, self.DEFAULT_REPO_PATH)
         repo_root = Path(repo_root)
         self.logger.info(f"[PushConfigToDevice] Using repo root: {repo_root}")
@@ -102,7 +110,41 @@ class PushConfigToDevice(Job):
             )
             return
 
-        # Device connection details
+        # Render template only for this one interface
+        try:
+            env = Environment(
+                loader=FileSystemLoader(str(template_path.parent)),
+                autoescape=False,
+            )
+            template = env.get_template(template_path.name)
+            rendered = template.render(interfaces=[interface])
+        except Exception as e:
+            self.logger.error(
+                f"[PushConfigToDevice] Error while rendering template {template_path}: {e}"
+            )
+            return
+
+        # Collect "set ..." lines only (no delete)
+        config_lines = []
+        for line in rendered.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            config_lines.append(line)
+
+        if not config_lines:
+            self.logger.warning(
+                f"[PushConfigToDevice] No 'set' lines generated for {interface}, "
+                f"nothing to push."
+            )
+            return
+
+        self.logger.info(
+            f"[PushConfigToDevice] Generated config lines for {device.name} / {interface.name}: "
+            f"{config_lines}"
+        )
+
+        # Device connection details (secrets: for now, env vars; later you can hook into Nautobot secrets)
         platform = getattr(device, "platform", None)
         driver = getattr(platform, "network_driver", None)
 
@@ -132,41 +174,6 @@ class PushConfigToDevice(Job):
             )
             return
 
-        # Render config for exactly this interface
-        try:
-            env = Environment(
-                loader=FileSystemLoader(str(template_path.parent)),
-                autoescape=False,
-            )
-            template = env.get_template(template_path.name)
-            rendered = template.render(interfaces=[interface])
-        except Exception as e:
-            self.logger.error(
-                f"[PushConfigToDevice] Error while rendering template {template_path}: {e}"
-            )
-            return
-
-        config_lines = [
-            f"delete interfaces {interface.name} unit 0 family ethernet-switching vlan"
-        ]
-        for line in rendered.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            config_lines.append(line)
-
-        if not config_lines:
-            self.logger.warning(
-                f"[PushConfigToDevice] No config lines generated for {interface}, "
-                f"nothing to push."
-            )
-            return
-
-        self.logger.info(
-            f"[PushConfigToDevice] Generated config lines for {device.name} / {interface.name}: "
-            f"{config_lines}"
-        )
-
         device_params = {
             "device_type": driver,  # "juniper_junos"
             "host": host,
@@ -181,36 +188,15 @@ class PushConfigToDevice(Job):
 
         try:
             with ConnectHandler(**device_params) as conn:
-                output = conn.send_config_set(config_lines, exit_config_mode=False)
+                output = conn.send_config_set(config_lines)
                 self.logger.info(
                     f"[PushConfigToDevice] Config push output for {device.name}:\n{output}"
                 )
-
-                # Commit for Junos
-                try:
-                    commit_out = conn.commit(and_quit=True)
-                    self.logger.info(
-                        f"[PushConfigToDevice] Commit output for {device.name}:\n{commit_out}"
-                    )
-                except AttributeError:
-                    self.logger.warning(
-                        f"[PushConfigToDevice] Connection for {device.name} has no commit(), "
-                        f"trying to exit config mode only."
-                    )
-                    conn.exit_config_mode()
-
-        except NetmikoTimeoutError as e:
-            self.logger.error(
-                f"[PushConfigToDevice] Timeout connecting to {device.name} ({host}): {e}"
-            )
-        except NetmikoAuthenticationException as e:
-            self.logger.error(
-                f"[PushConfigToDevice] Authentication failed for {device.name} ({host}): {e}"
-            )
         except Exception as e:
             self.logger.error(
                 f"[PushConfigToDevice] Error while pushing config to {device.name} ({host}): {e}"
             )
+            return
 
         self.logger.info(
             f"[PushConfigToDevice] Finished push for {device.name} / {interface.name}."
