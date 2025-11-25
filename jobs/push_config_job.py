@@ -1,246 +1,281 @@
-# push_config_job.py
+# config_pipeline_job.py
+#
+# This is the main orchestration job that runs the entire configuration pipeline.
+#
+# What it does:
+# 1. Calls the Backup job to save current device config
+# 2. Calls the Intended Config job to render what config should look like
+# 3. Calls the Push job to send config changes to the device
+# 4. Optionally runs "git push" at the end to sync to remote repository
+#
+# Why we need this:
+# This ties everything together into one automated workflow. When a VLAN changes
+# in Nautobot, this pipeline ensures we:
+# - Have a backup before making changes (safety)
+# - Generate the correct intended config (consistency)
+# - Push changes to the device (automation)
+# - Track everything in Git (audit trail)
+#
+# The pipeline can be triggered manually or automatically by the Socket sync job hook.
 
 import os
+import subprocess
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader
 from nautobot.apps.jobs import Job, ObjectVar, register_jobs
-from nautobot.dcim.models import Device, Interface
+from nautobot.dcim.models import Device
 
-from nautobot.extras.choices import SecretsGroupAccessTypeChoices, SecretsGroupSecretTypeChoices
-from nautobot.extras.secrets.exceptions import SecretError
+# Import the individual jobs that make up our pipeline
+# These are relative imports from the same package
+from .backup_config_job import BackupDeviceConfig
+from .intended_config_job import BuildIntendedConfig
+from .push_config_job import PushConfigToDevice
 
+# Groups all related jobs together in the Nautobot UI
 name = "00_Vlan-Change-Jobs"
 
 
-class PushConfigToDevice(Job):
+class ConfigPipeline(Job):
     """
-    Step 3: Very simple push job.
-
-    - Takes a device (ObjectVar).
-    - Expects 'interface' and 'vlan' via kwargs (from the pipeline job).
-    - Renders Junos 'set' commands for exactly this interface using the Jinja template.
-    - Sends only these 'set' commands via Netmiko (no deletes, no extra logic).
+    Main pipeline orchestrator job - runs backup, intended, and push in sequence.
+    
+    This job coordinates the entire configuration management workflow:
+    1. Backup current device state (safety net)
+    2. Build intended config from Nautobot data (source of truth)
+    3. Push changes to device (automation)
+    4. Sync to Git remote (version control)
     """
 
     class Meta:
-        name = "03_Push config to device (POC)"
-        description = "Render and push simple Junos 'set' commands for a single switch interface."
+        # Name as shown in Nautobot - using "00_" prefix to sort it to the top
+        name = "00_Config pipeline (POC)"
+        
+        # Help text for users
+        description = "Runs backup, intended config build, and config push in sequence for a device."
+        
+        # We don't modify Nautobot database directly (sub-jobs might, but we don't)
         commit_default = False
 
+    # Define input parameter - which device to run pipeline for
     device = ObjectVar(
         model=Device,
         required=True,
-        description="Device to push config to.",
+        description="Device to run the complete configuration pipeline for.",
     )
 
-    REPO_ENV_VAR = "POC_NETOPS_REPO"
-    DEFAULT_REPO_PATH = "/opt/nautobot/git/poc_netops"
-    TEMPLATE_REL_PATH = "templates/juniper_junos.j2"
-
     def run(self, device, interface=None, vlan=None, **kwargs):
-        self.logger.info("[PushConfigToDevice] DEBUG: entering NEW run() implementation")
-
-        # Lazy import Netmiko
-        try:
-            from netmiko import ConnectHandler
-        except ModuleNotFoundError:
-            self.logger.error(
-                "[PushConfigToDevice] netmiko is not installed in the Nautobot environment, "
-                "cannot push configuration."
-            )
-            return
-        except Exception as e:
-            self.logger.error(
-                f"[PushConfigToDevice] Error importing netmiko (NEW): {e}"
-            )
-            return
-
-        self.logger.info(
-            f"[PushConfigToDevice] Starting push job for device {device} (pk={device.pk})."
-        )
-        self.logger.info(
-            f"[PushConfigToDevice] Context received: interface={interface}, "
-            f"vlan={getattr(vlan, 'id', vlan)}"
-        )
-
-        if interface is None:
-            self.logger.warning(
-                "[PushConfigToDevice] No interface passed, nothing to push."
-            )
-            return
-
-        if not isinstance(interface, Interface):
-            self.logger.error(
-                f"[PushConfigToDevice] 'interface' is not an Interface instance "
-                f"(got {type(interface)}), aborting."
-            )
-            return
-
-        if interface.device != device:
-            self.logger.error(
-                f"[PushConfigToDevice] Interface {interface} does not belong to device {device}, "
-                f"aborting."
-            )
-            return
-
-        if vlan is None:
-            vlan = getattr(interface, "untagged_vlan", None)
-
-        if vlan is None:
-            self.logger.info(
-                f"[PushConfigToDevice] No VLAN found for interface {interface}, "
-                f"nothing to push."
-            )
-            return
-
-        # Template / repo
-        repo_root = os.environ.get(self.REPO_ENV_VAR, self.DEFAULT_REPO_PATH)
-        repo_root = Path(repo_root)
-        self.logger.info(f"[PushConfigToDevice] Using repo root: {repo_root}")
-
-        template_path = repo_root / self.TEMPLATE_REL_PATH
-        if not template_path.exists():
-            self.logger.error(
-                f"[PushConfigToDevice] Template file {template_path} does not exist."
-            )
-            return
-
-        try:
-            env = Environment(
-                loader=FileSystemLoader(str(template_path.parent)),
-                autoescape=False,
-            )
-            template = env.get_template(template_path.name)
-            rendered = template.render(interfaces=[interface])
-        except Exception as e:
-            self.logger.error(
-                f"[PushConfigToDevice] Error while rendering template {template_path}: {e}"
-            )
-            return
-
-        # Config Lines
-        config_lines = [
-            f"delete interfaces {interface.name} unit 0 family ethernet-switching vlan members"
-        ]
-
-        for line in rendered.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            config_lines.append(line)
+        """
+        Main execution method that orchestrates the entire pipeline.
+        
+        Args:
+            device: The Device object to process (required)
+            interface: The specific Interface that triggered this (optional, for context)
+            vlan: The VLAN being configured (optional, for context)
+            **kwargs: Additional arguments (ignored)
             
-        if not config_lines:
-            self.logger.warning(
-                f"[PushConfigToDevice] No 'set' lines generated for {interface}, "
-                f"nothing to push."
-            )
-            return
-
+        The interface and vlan parameters are passed through to each sub-job for
+        context and logging purposes. They help us understand what triggered the
+        pipeline and what changes we're making.
+        """
+        
         self.logger.info(
-            f"[PushConfigToDevice] About to send the following commands to "
-            f"{device.name} / {interface.name}: {config_lines}"
+            "[ConfigPipeline] =========================================="
+        )
+        self.logger.info(
+            f"[ConfigPipeline] Starting configuration pipeline for device {device.name} "
+            f"(database ID: {device.pk})"
+        )
+        self.logger.info(
+            "[ConfigPipeline] =========================================="
+        )
+        
+        # Log the context that triggered this pipeline
+        # This helps with debugging and understanding the audit trail
+        self.logger.info(
+            f"[ConfigPipeline] Pipeline context:"
+        )
+        self.logger.info(
+            f"  - Target device: {device.name}"
+        )
+        self.logger.info(
+            f"  - Interface: {interface.name if interface else 'N/A'}"
+        )
+        self.logger.info(
+            f"  - VLAN: {getattr(vlan, 'id', vlan) if vlan else 'N/A'}"
         )
 
-        # Device / Platform / IP
-        platform = getattr(device, "platform", None)
-        driver = getattr(platform, "network_driver", None)
-
-        if driver != "juniper_junos":
-            self.logger.info(
-                f"[PushConfigToDevice] Device {device} has platform driver '{driver}', "
-                f"not 'juniper_junos' – skipping push for this PoC."
-            )
-            return
-
-        primary_ip = getattr(device, "primary_ip4", None)
-        if primary_ip is None:
-            self.logger.warning(
-                f"[PushConfigToDevice] Device {device} has no primary IPv4 address, "
-                f"cannot connect for config push."
-            )
-            return
-
-        host = str(primary_ip.address.ip)
-
-            # --- Credentials via device.secrets_group (zugewiesene Secrets Group) ---
-        username = None
-        password = None
-
-        # device.secrets_group ist ein RelatedManager, wir nehmen einfach die erste Gruppe
-        secrets_group = getattr(device, "secrets_group", None)
-
-        if secrets_group:
-            try:
-                # access_type lassen wir weg, wir nehmen einfach die USERNAME/PASSWORD Secrets
-                username = secrets_group.get_secret_value(
-                    secret_type=SecretsGroupSecretTypeChoices.TYPE_USERNAME,
-                    access_type=SecretsGroupAccessTypeChoices.TYPE_GENERIC,
-                    obj=device,
-                )
-                password = secrets_group.get_secret_value(
-                    secret_type=SecretsGroupSecretTypeChoices.TYPE_PASSWORD,
-                    access_type=SecretsGroupAccessTypeChoices.TYPE_GENERIC,
-                    obj=device,
-                )
-                self.logger.info(
-                    f"[PushConfigToDevice] Retrieved username/password from SecretsGroup "
-                    f"'{secrets_group}' for device {device}."
-                )
-            except SecretError as e:
-                self.logger.error(
-                    f"[PushConfigToDevice] Error retrieving credentials from SecretsGroup "
-                    f"for device {device}: {e}"
-                )
-
-        # Fallback: ENV
-        if not username or not password:
-            env_user = os.environ.get("NETMIKO_USERNAME")
-            env_pass = os.environ.get("NETMIKO_PASSWORD")
-            if env_user and env_pass:
-                username = env_user
-                password = env_pass
-                self.logger.info(
-                    "[PushConfigToDevice] Using fallback credentials from NETMIKO_* env vars."
-                )
-
-        if not username or not password:
-            self.logger.error(
-                "[PushConfigToDevice] No credentials found in device.secrets_group "
-                "and no NETMIKO_* env vars set. Cannot push configuration."
-            )
-            return
-
-        device_params = {
-            "device_type": driver,
-            "host": host,
-            "username": username,
-            "password": password,
-        }
-
+        # --- STEP 1: BACKUP ---
+        # Before making any changes, save the current device configuration
+        # This gives us a rollback point if something goes wrong
         self.logger.info(
-            f"[PushConfigToDevice] Connecting to device {device.name} ({host}) "
-            f"to push config for interface {interface.name}."
+            "[ConfigPipeline] =========================================="
+        )
+        self.logger.info(
+            "[ConfigPipeline] STEP 1 of 3: Running device configuration backup"
+        )
+        self.logger.info(
+            "[ConfigPipeline] =========================================="
+        )
+        
+        # Create an instance of the backup job
+        backup_job = BackupDeviceConfig()
+        
+        # Share our logger so all output appears in the same log stream
+        # This makes it easier to follow the entire pipeline in one place
+        backup_job.logger = self.logger
+        
+        # Run the backup job with our device and context
+        backup_job.run(device=device, interface=interface, vlan=vlan)
+        
+        self.logger.info(
+            "[ConfigPipeline] Step 1 completed: Backup finished"
         )
 
+        # --- STEP 2: BUILD INTENDED CONFIG ---
+        # Generate what the configuration SHOULD look like based on Nautobot data
+        # This is our "desired state" derived from the source of truth
+        self.logger.info(
+            "[ConfigPipeline] =========================================="
+        )
+        self.logger.info(
+            "[ConfigPipeline] STEP 2 of 3: Building intended configuration"
+        )
+        self.logger.info(
+            "[ConfigPipeline] =========================================="
+        )
+        
+        # Create an instance of the intended config job
+        intended_job = BuildIntendedConfig()
+        
+        # Share our logger
+        intended_job.logger = self.logger
+        
+        # Run the intended config job
+        intended_job.run(device=device, interface=interface, vlan=vlan)
+        
+        self.logger.info(
+            "[ConfigPipeline] Step 2 completed: Intended config built"
+        )
+
+        # --- STEP 3: PUSH CONFIG TO DEVICE ---
+        # Send the configuration commands to the actual device
+        # This makes the real-world device match our source of truth
+        self.logger.info(
+            "[ConfigPipeline] =========================================="
+        )
+        self.logger.info(
+            "[ConfigPipeline] STEP 3 of 3: Pushing configuration to device"
+        )
+        self.logger.info(
+            "[ConfigPipeline] =========================================="
+        )
+        
+        # Create an instance of the push job
+        push_job = PushConfigToDevice()
+        
+        # Share our logger
+        push_job.logger = self.logger
+        
+        # Run the push job
+        # This is where the actual device configuration changes happen
+        push_job.run(device=device, interface=interface, vlan=vlan)
+        
+        self.logger.info(
+            "[ConfigPipeline] Step 3 completed: Configuration pushed to device"
+        )
+
+        # --- PIPELINE COMPLETION ---
+        self.logger.info(
+            "[ConfigPipeline] =========================================="
+        )
+        self.logger.info(
+            f"[ConfigPipeline] Pipeline completed successfully for device {device.name}"
+        )
+        self.logger.info(
+            "[ConfigPipeline] =========================================="
+        )
+
+        # --- OPTIONAL: GIT PUSH ---
+        # At this point, we have:
+        # - Backed up the config (committed to Git)
+        # - Built intended config (committed to Git)
+        # - Pushed changes to device
+        # 
+        # Now we can optionally push to a remote Git repository
+        # This syncs our local commits to a central server for team collaboration
+        
+        # Locate the Git repository
+        repo_root = Path(
+            os.environ.get("POC_NETOPS_REPO", "/opt/nautobot/git/poc_netops")
+        )
+        git_dir = repo_root / ".git"
+
+        # Check if this is actually a Git repository
+        if not git_dir.exists():
+            self.logger.warning(
+                f"[ConfigPipeline] Directory {repo_root} is not a Git repository "
+                f"(no .git directory found). Skipping git push. "
+                f"To initialize: cd {repo_root} && git init"
+            )
+            return
+
+        # Try to push to remote
+        self.logger.info(
+            "[ConfigPipeline] =========================================="
+        )
+        self.logger.info(
+            f"[ConfigPipeline] Running 'git push' to sync commits to remote repository"
+        )
+        self.logger.info(
+            f"[ConfigPipeline] Repository: {repo_root}"
+        )
+        self.logger.info(
+            "[ConfigPipeline] =========================================="
+        )
+        
         try:
-            with ConnectHandler(**device_params) as conn:
-                self.logger.info(
-                    f"[PushConfigToDevice] Sending config_set with lines: {config_lines}"
-                )
-                output = conn.send_config_set(config_lines)
-                self.logger.info(
-                    f"[PushConfigToDevice] Config push output for {device.name}:\n{output}"
-                )
-        except Exception as e:
-            self.logger.error(
-                f"[PushConfigToDevice] Error while pushing config to {device.name} ({host}): {e}"
+            # Run git push command
+            push_proc = subprocess.run(
+                ["git", "-C", str(repo_root), "push"],
+                capture_output=True,  # Capture output for logging
+                text=True,  # Return strings instead of bytes
+                check=False,  # Don't raise exception on failure
             )
-            return
+            
+            # Log the results
+            self.logger.info(
+                f"[ConfigPipeline] git push exit code: {push_proc.returncode}"
+            )
+            
+            if push_proc.returncode == 0:
+                # Success
+                self.logger.info(
+                    f"[ConfigPipeline] git push succeeded. Output: '{push_proc.stdout.strip()}'"
+                )
+            else:
+                # Failed - might be no remote configured, authentication issue, etc.
+                self.logger.warning(
+                    f"[ConfigPipeline] git push failed. This is not critical - commits are "
+                    f"still saved locally. Error: '{push_proc.stderr.strip()}'"
+                )
+                
+        except Exception as e:
+            # Command execution failed
+            self.logger.error(
+                f"[ConfigPipeline] Exception while running git push: {e}. "
+                f"Commits are still saved locally in {repo_root}."
+            )
 
         self.logger.info(
-            f"[PushConfigToDevice] Finished push for {device.name} / {interface.name}."
+            "[ConfigPipeline] =========================================="
+        )
+        self.logger.info(
+            "[ConfigPipeline] All pipeline operations completed"
+        )
+        self.logger.info(
+            "[ConfigPipeline] =========================================="
         )
 
 
-register_jobs(PushConfigToDevice)
+# Register this job so Nautobot can discover and run it
+register_jobs(ConfigPipeline)
