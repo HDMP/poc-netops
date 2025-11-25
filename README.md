@@ -1,4 +1,3 @@
-# poc-netops
 # Network Configuration Automation PoC
 
 > **Automated VLAN provisioning and configuration management using Nautobot as the Source of Truth**
@@ -6,7 +5,6 @@
 [![Nautobot](https://img.shields.io/badge/Nautobot-Source%20of%20Truth-blue)](https://nautobot.com)
 [![Juniper](https://img.shields.io/badge/Platform-Juniper%20JunOS-orange)](https://www.juniper.net)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-green)](https://www.python.org)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
@@ -47,38 +45,62 @@ This repository contains a **Proof of Concept (PoC)** for automated network conf
 
 ### Business Problem
 
-When customers request VLAN changes on their Socket (customer-facing port), network engineers traditionally need to:
+**Traditional Workflow for Customer VLAN Changes in a Business Park:**
 
-1. Manually update the Socket interface VLAN in Nautobot
-2. Manually update the connected Switch port VLAN in Nautobot
-3. Manually SSH into the switch
-4. Manually configure the interface
-5. Hope nothing breaks 🤞
+When a customer in the business park needs a VLAN change on their Socket (customer-facing port), the process is painful:
 
-**This is slow, error-prone, and doesn't scale.**
+1. Customer contacts support via ticket/email/phone
+2. Network engineer receives request
+3. Engineer must find which Switch port the Socket connects to:
+   - Manually trace physical cabling in the datacenter 🔌
+   - Check Excel spreadsheet documentation (if it exists and is current)
+   - Look up patching info in management tools like Omnivista
+   - Hope the documentation is actually correct
+4. Engineer manually SSH into the switch
+5. Engineer manually configures the interface
+6. Engineer updates documentation (maybe)
+7. Engineer notifies customer (hours or days later)
 
-### Solution
+**Problems:**
+- ❌ Slow turnaround (hours to days)
+- ❌ Documentation often outdated or wrong
+- ❌ Manual cabling verification required
+- ❌ Error-prone manual configuration
+- ❌ No self-service for customers
+- ❌ High operational overhead
 
-This PoC automates the entire workflow:
+### Solution: Customer Self-Service with Automation
+
+This PoC enables **customer self-service** through Nautobot's permission system:
 
 ```
-Customer requests VLAN change
+Customer logs into Nautobot (restricted access)
          ↓
-Engineer updates Socket VLAN in Nautobot UI
+Customer sees ONLY their Socket interface
+         ↓
+Customer changes VLAN via web UI
          ↓
 JobHook automatically detects change
          ↓
-Switch interface VLAN updated in Nautobot (sync)
+Switch interface VLAN synced in Nautobot automatically
          ↓
 Pipeline triggered automatically:
   ├─ Backup current device config
   ├─ Generate intended config from Nautobot
   └─ Push config to physical device
          ↓
-Customer VLAN is live ✅
+Customer VLAN is live within seconds ✅
 ```
 
-**Result:** What took 15-30 minutes now takes seconds, with full audit trail and zero manual device access.
+**Result:** 
+- ✅ Self-service for customers (24/7 availability)
+- ✅ Instant provisioning (seconds instead of hours/days)
+- ✅ No manual cabling verification needed (Nautobot is the Source of Truth)
+- ✅ Zero manual device configuration
+- ✅ Full audit trail in Git
+- ✅ Documentation always current (Nautobot + Git)
+
+**The Key:** Nautobot knows the Socket ↔ Switch mapping through cable connections, eliminating the need for Excel sheets or manual verification!
 
 ---
 
@@ -276,41 +298,6 @@ Sync all commits to central server
 
 ---
 
-## 🔧 Prerequisites
-
-### System Requirements
-
-- **Nautobot**: v2.0+ running and accessible
-- **Python**: 3.8 or higher
-- **Git**: Installed on Nautobot server
-- **Network Access**: SSH connectivity to managed devices
-
-### Python Dependencies
-
-```bash
-# Required packages
-nautobot >= 2.0.0
-netmiko >= 4.0.0
-jinja2 >= 3.0.0
-```
-
-### Device Requirements
-
-- **Platform**: Juniper JunOS (vJunOS or physical)
-- **Access**: SSH enabled with authentication configured
-- **Credentials**: Stored in Nautobot Secrets Group or environment variables
-
-### Nautobot Setup
-
-1. Device roles configured: `Socket`, `Switch`
-2. Devices created with:
-   - Platform set to `juniper_junos`
-   - Primary IPv4 address assigned
-   - Secrets Group with SSH credentials (optional)
-3. Interfaces created and cabled between Socket and Switch devices
-
----
-
 ## 📦 Installation
 
 ### 1. Clone Repository
@@ -361,42 +348,6 @@ sudo systemctl restart nautobot nautobot-worker
    - `02_Build intended config (POC)`
    - `03_Push config to device (POC)`
    - `99_Sync Socket VLAN to Switch`
-
----
-
-## ⚙️ Configuration
-
-### Secrets Group Setup (Recommended)
-
-1. Navigate to **Secrets** → **Secrets Groups** in Nautobot
-2. Create a new Secrets Group (e.g., "Device SSH Credentials")
-3. Add secrets:
-   - **Type**: Username → **Value**: `admin`
-   - **Type**: Password → **Value**: `your_device_password`
-4. Assign Secrets Group to devices:
-   - Edit device → **Secrets Group** field → Select your group
-
-### Template Customization
-
-Edit `/templates/juniper_junos.j2` to customize configuration generation:
-
-```jinja
-{# Example: Generate config for all interfaces #}
-{% for interface in interfaces %}
-set interfaces {{ interface.name }} unit 0 family ethernet-switching interface-mode access
-{% if interface.untagged_vlan %}
-set interfaces {{ interface.name }} unit 0 family ethernet-switching vlan members {{ interface.untagged_vlan.vid }}
-{% endif %}
-{% endfor %}
-```
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `POC_NETOPS_REPO` | `/opt/nautobot/git/poc_netops` | Path to Git repository |
-| `NETMIKO_USERNAME` | - | Fallback SSH username |
-| `NETMIKO_PASSWORD` | - | Fallback SSH password |
 
 ---
 
@@ -649,47 +600,12 @@ self.logger.setLevel(logging.DEBUG)
 
 ---
 
-## 🤝 Contributing
-
-### Development Workflow
-
-1. Create feature branch
-2. Make changes to jobs or templates
-3. Test with manual job execution
-4. Commit with descriptive messages
-5. Create pull request
-
-### Code Style
-
-- Follow PEP 8 for Python code
-- Add comprehensive comments
-- Update README for significant changes
-- Test with actual devices before merging
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
 ## 🙏 Acknowledgments
 
 - **Nautobot** - Network Source of Truth platform
 - **Netmiko** - Multi-vendor SSH library
 - **Jinja2** - Templating engine
 - **Juniper Networks** - vJunOS platform for testing
-
----
-
-## 📞 Contact
-
-For questions, issues, or suggestions:
-
-- Create an issue in this repository
-- Contact the Network Automation team
-- Review Nautobot documentation: https://docs.nautobot.com
 
 ---
 
