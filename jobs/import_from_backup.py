@@ -20,8 +20,9 @@ class ImportJunosFromBackup(jobs.Job):
         name = "Import Junos (VLANs & Access-Ports) from Backup"
         commit_default = True
 
-    def _get_or_create_active_status(self):
-        ct = ContentType.objects.get_for_model(VLAN)
+    def _get_or_create_active_status(self, model):
+        """Get or create Active status for given model."""
+        ct = ContentType.objects.get_for_model(model)
         st = Status.objects.filter(content_types=ct, name__iexact="active").first()
         if not st:
             st = Status.objects.create(name="Active", color="green")
@@ -40,7 +41,8 @@ class ImportJunosFromBackup(jobs.Job):
             txt = fh.read()
 
         dev_loc = getattr(device, "location", None)    # Nautobot 2.x
-        active_status = self._get_or_create_active_status()
+        vlan_status = self._get_or_create_active_status(VLAN)
+        interface_status = self._get_or_create_active_status(Interface)
 
         # ---------- VLANs: überall Stanzas "NAME { ... vlan-id N; }" finden
         created = updated = 0
@@ -56,7 +58,7 @@ class ImportJunosFromBackup(jobs.Job):
                 qs = qs.filter(location=dev_loc)
             vlan = qs.first()
             if not vlan:
-                payload = {"name": vname, "vid": vid, "status": active_status}
+                payload = {"name": vname, "vid": vid, "status": vlan_status}
                 if dev_loc:
                     payload["location"] = dev_loc
                 VLAN.objects.create(**payload)
@@ -66,14 +68,12 @@ class ImportJunosFromBackup(jobs.Job):
                 if vlan.name != vname:
                     vlan.name = vname; changed = True
                 if not vlan.status_id:
-                    vlan.status = active_status; changed = True
+                    vlan.status = vlan_status; changed = True
                 if changed:
                     vlan.save(); updated += 1
         self.logger.info(f"VLANs parsed: {len(vlan_map)}; created: {created}, updated: {updated}")
 
         # ---------- Interfaces: ge-x/x/x Blocks parsen, Access + untagged VLAN mappen
-        # Beispiel im Backup:
-        # interfaces { ge-0/0/1 { unit 0 { family ethernet-switching { interface-mode access; vlan { members A-CLIENT; }}}}}
         port_updates = 0
         for ib in re.finditer(r"\n\s*(ge-\d+/\d+/\d+)\s*{(.*?)}\s*\n", txt, re.S):
             ifname, ibody = ib.group(1), ib.group(2)
@@ -93,7 +93,13 @@ class ImportJunosFromBackup(jobs.Job):
 
             iface = Interface.objects.filter(device=device, name=ifname).first()
             if not iface:
-                iface = Interface.objects.create(device=device, name=ifname, type="other", enabled=True)
+                iface = Interface.objects.create(
+                    device=device, 
+                    name=ifname, 
+                    type="other", 
+                    status=interface_status,  # ADD THIS
+                    enabled=True
+                )
 
             changed = False
             if hasattr(iface, "mode") and iface.mode != "access":
