@@ -1,3 +1,11 @@
+> **Note on Origin and Scope of this Repository**  
+> This repository, including this README and the Python jobs in the `/jobs` directory, was drafted and refined with support from an AI assistant (ChatGPT).  
+> The architecture, concepts and technical logic were defined and validated by the author as part of a diploma project.  
+> The Git history in this repository must **not** be used as evidence for creation dates, version timelines or authorship. During the project multiple repositories and working copies were used.  
+> This repository is provided purely as a demonstrator for the implemented jobs, backup files and templates that underpin the written diploma documentation.
+
+
+
 # Network Configuration Automation PoC
 
 > **Automated VLAN provisioning and configuration management using Nautobot as the Source of Truth**
