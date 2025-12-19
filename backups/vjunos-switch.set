@@ -17,17 +17,17 @@ set system processes dhcp-service traceoptions file size 10m
 set system processes dhcp-service traceoptions level all
 set system processes dhcp-service traceoptions flag packet
 set interfaces ge-0/0/0 unit 0 family ethernet-switching interface-mode access
-set interfaces ge-0/0/0 unit 0 family ethernet-switching vlan members B-CLIENT
+set interfaces ge-0/0/0 unit 0 family ethernet-switching vlan members A-CLIENT
 set interfaces ge-0/0/1 unit 0 family ethernet-switching interface-mode access
 set interfaces ge-0/0/1 unit 0 family ethernet-switching vlan members A-SERVER
 set interfaces ge-0/0/2 unit 0 family ethernet-switching interface-mode access
-set interfaces ge-0/0/2 unit 0 family ethernet-switching vlan members B-CLIENT
+set interfaces ge-0/0/2 unit 0 family ethernet-switching vlan members A-CLIENT
 set interfaces ge-0/0/3 unit 0 family ethernet-switching interface-mode access
-set interfaces ge-0/0/3 unit 0 family ethernet-switching vlan members B-SERVER
+set interfaces ge-0/0/3 unit 0 family ethernet-switching vlan members A-SERVER
 set interfaces ge-0/0/4 unit 0 family ethernet-switching interface-mode access
-set interfaces ge-0/0/4 unit 0 family ethernet-switching vlan members B-SERVER
+set interfaces ge-0/0/4 unit 0 family ethernet-switching vlan members B-CLIENT
 set interfaces ge-0/0/5 unit 0 family ethernet-switching interface-mode access
-set interfaces ge-0/0/5 unit 0 family ethernet-switching vlan members A-SERVER
+set interfaces ge-0/0/5 unit 0 family ethernet-switching vlan members B-SERVER
 set interfaces ge-0/0/6 unit 0 family ethernet-switching interface-mode access
 set interfaces ge-0/0/6 unit 0 family ethernet-switching vlan members B-CLIENT
 set interfaces ge-0/0/7 unit 0 family ethernet-switching interface-mode access
